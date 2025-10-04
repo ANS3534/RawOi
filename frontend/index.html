@@ -1,68 +1,169 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Palm Oil Forecast</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Palm Oil Forecast (Live)</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f7f9fb;
-      margin: 0;
-      padding: 20px;
-      color: #333;
+    :root{
+      --bg:#f7fafc; --card:#ffffff; --muted:#64748b; --accent:#4f46e5;
     }
-    h1 {
-      text-align: center;
-    }
-    .chart-container {
-      width: 90%;
-      max-width: 800px;
-      margin: 20px auto;
-      background: #fff;
-      border-radius: 15px;
-      padding: 20px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-    }
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);margin:0;padding:18px;color:#0f172a;}
+    .wrap{max-width:1100px;margin:0 auto;}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+    h1{margin:0;font-size:20px}
+    .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(2,6,23,0.06);margin-bottom:12px}
+    .grid{display:grid;grid-template-columns:2fr 1fr;gap:16px}
+    .chart-area{height:320px}
+    .forecast-row{display:flex;gap:12px;margin-top:12px}
+    .forecast-card{flex:1;background:#f1f5f9;border-radius:10px;padding:12px;text-align:center}
+    .forecast-card h2{margin:6px 0;font-size:22px;color:#0f172a}
+    .muted{color:var(--muted);font-size:13px}
+    .features li{margin-bottom:10px}
+    .bar{height:10px;border-radius:6px;background:#e6eefc;overflow:hidden}
+    .bar-inner{height:10px;border-radius:6px;background:var(--accent)}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);color:white;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+    .small{font-size:12px;color:var(--muted)}
+    .status{margin-top:8px;font-size:13px;color:#b91c1c}
   </style>
 </head>
 <body>
-  <h1>🌴 Palm Oil Price Forecast (Live)</h1>
-  <div class="chart-container">
-    <canvas id="forecastChart"></canvas>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>🌴 Palm Oil Forecast · Live</h1>
+        <div class="small">Grafik canlı backend'den veri çekiyor</div>
+      </div>
+      <div class="controls">
+        <button class="btn" id="refreshBtn">Yenile</button>
+      </div>
+    </header>
+
+    <main class="card grid">
+      <section>
+        <div class="chart-area">
+          <canvas id="priceChart"></canvas>
+        </div>
+
+        <div class="forecast-row">
+          <div class="forecast-card">
+            <div class="muted">7-gün tahmin</div>
+            <h2 id="f7">—</h2>
+            <div class="small" id="f7note">Tahmin</div>
+          </div>
+          <div class="forecast-card">
+            <div class="muted">30-gün tahmin</div>
+            <h2 id="f30">—</h2>
+            <div class="small" id="f30note">Tahmin</div>
+          </div>
+        </div>
+      </section>
+
+      <aside>
+        <div class="card" style="margin-bottom:12px">
+          <div class="muted">Model</div>
+          <div style="font-weight:600">Hybrid AR + XGBoost (demo)</div>
+          <div class="small" id="modelupdated">Güncelleme: —</div>
+        </div>
+
+        <div class="card">
+          <div class="muted">Öne çıkan etkiler</div>
+          <ul id="features" class="features" style="list-style:none;padding-left:0;margin-top:10px"></ul>
+        </div>
+
+        <div id="status" class="status" aria-live="polite"></div>
+      </aside>
+    </main>
+
+    <div class="small" style="margin-top:8px">Bu sayfa backend <code>/forecast</code> endpoint'ine bağlanır. Hata olursa aşağıdaki mesaj çıkar.</div>
   </div>
 
-  <script>
-    async function loadData() {
-      const response = await fetch("https://YOUR_BACKEND_URL.onrender.com/forecast");
-      const data = await response.json();
+<script>
+  // --- AYAR: burayı kendi backend URL'inle değiştir ---
+  const FORECAST_URL = "https://rawoi.onrender.com/forecast";
+  // ------------------------------------------------
 
-      const ctx = document.getElementById('forecastChart').getContext('2d');
-      new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: data.days.map(d => 'Day ' + d),
-          datasets: [{
-            label: 'Predicted Price (USD/ton)',
-            data: data.prices,
-            borderColor: 'rgba(75, 192, 192, 1)',
-            backgroundColor: 'rgba(75, 192, 192, 0.2)',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 5,
-            pointBackgroundColor: '#4bc0c0'
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { position: 'bottom' }
-          }
-        }
-      });
+  let chart = null;
+
+  async function loadData(showStatus=true){
+    const statusEl = document.getElementById('status');
+    try{
+      if(showStatus) statusEl.textContent = "Veri çekiliyor...";
+      const resp = await fetch(FORECAST_URL, {cache: "no-store"});
+      if(!resp.ok) throw new Error("Sunucudan beklenmeyen dönüş: " + resp.status);
+      const data = await resp.json();
+
+      // Beklenen JSON formatı:
+      // { days: [1,2,3...], prices: [850, 860,...], forecast_7d: 123, forecast_30d: 456, today: "2025-10-01" } 
+      const days = data.days ?? (Array.isArray(data.prices) ? data.prices.map((_,i)=>i+1) : []);
+      const prices = data.prices ?? [];
+
+      renderChart(days.map(d=>'G' + d), prices);
+      // update cards - backend 7d/30d alanları varsa kullan, yoksa son fiyat üzerinden örnek üret
+      const lastPrice = (prices.length>0) ? prices[prices.length-1] : (data.last_price ?? null);
+      document.getElementById('f7').innerText = data.forecast_7d ?? (lastPrice ? (lastPrice*1.02).toFixed(2) : '—');
+      document.getElementById('f30').innerText = data.forecast_30d ?? (lastPrice ? (lastPrice*1.05).toFixed(2) : '—');
+      document.getElementById('modelupdated').innerText = 'Güncelleme: ' + (data.today ?? new Date().toISOString().slice(0,10));
+      populateFeatures(data.features ?? [
+        {name:'USD/MYR', importance:0.32},
+        {name:'MPOB Export', importance:0.21},
+        {name:'Rainfall anomaly', importance:0.14},
+      ]);
+      statusEl.textContent = "";
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = "Veri çekilemedi: " + err.message;
+      // Eğer backend CORS vermediyse tarayıcı consola CORS hatası düşer -> kullanıcılara açıklama:
+      if(err.message.includes("Failed to fetch") || err.message.includes("NetworkError")){
+        statusEl.textContent += " (Sunucuya erişim yok veya CORS engeli olabilir.)";
+      }
     }
-    loadData();
-  </script>
+  }
+
+  function renderChart(labels, values){
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Palm Oil Price (USD/ton)',
+          data: values,
+          borderColor: '#4f46e5',
+          backgroundColor: 'rgba(79,70,229,0.12)',
+          fill: true,
+          tension: 0.25,
+          pointRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {legend: {display:true, position:'bottom'}},
+        scales: {x: {display: true}, y: {display: true}}
+      }
+    });
+  }
+
+  function populateFeatures(features){
+    const el = document.getElementById('features');
+    el.innerHTML = '';
+    features.forEach(f=>{
+      const li = document.createElement('li');
+      const pct = Math.round((f.importance ?? 0)*100);
+      li.innerHTML = `<div style="font-weight:600">${f.name}</div>
+                      <div class="bar" style="margin-top:6px"><div class="bar-inner" style="width:${pct}%;"></div></div>
+                      <div class="small" style="margin-top:6px">${pct}% etkisi</div>`;
+      el.appendChild(li);
+    });
+  }
+
+  document.getElementById('refreshBtn').addEventListener('click', ()=>loadData());
+
+  // İlk yükleme
+  loadData();
+</script>
 </body>
 </html>

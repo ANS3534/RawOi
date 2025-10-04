@@ -3,7 +3,7 @@ from flask_cors import CORS
 import random
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route("/")
 def home():
@@ -11,7 +11,7 @@ def home():
 
 @app.route("/forecast")
 def forecast():
-    # Örnek tahmini fiyat verisi (daha sonra gerçek verilerle değiştirilebilir)
+    # Örnek tahmini fiyat verisi
     days = list(range(1, 31))
     base_price = 950
     prices = [round(base_price + random.uniform(-20, 25), 2) for _ in days]
